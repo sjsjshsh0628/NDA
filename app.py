@@ -364,27 +364,6 @@ with st.sidebar:
         key="ads_platform",
     )
 
-    # 날짜 선택: 오늘 / 직접 입력
-    def cb_ads_date_today():
-        st.session_state.ads_date_mode = "오늘"
-        st.session_state.ads_date_start = today
-        st.session_state.ads_date_end = today
-
-    def cb_ads_date_custom():
-        st.session_state.ads_date_mode = "직접 입력"
-
-    ac1, ac2 = st.columns(2)
-    with ac1:
-        st.button("오늘", key="btn_ads_date_today", use_container_width=True, on_click=cb_ads_date_today,
-                   type="primary" if st.session_state.ads_date_mode == "오늘" else "secondary")
-    with ac2:
-        st.button("직접 입력", key="btn_ads_date_custom", use_container_width=True, on_click=cb_ads_date_custom,
-                   type="primary" if st.session_state.ads_date_mode == "직접 입력" else "secondary")
-
-    if st.session_state.ads_date_mode == "직접 입력":
-        st.session_state.ads_date_start = st.date_input("시작일자", value=st.session_state.ads_date_start, key="ads_start")
-        st.session_state.ads_date_end = st.date_input("종료일자", value=st.session_state.ads_date_end, key="ads_end")
-
     mode_ads = st.radio(
         "입력 방식",
         ["파일 업로드", "샘플"],
@@ -462,114 +441,9 @@ def render_member_section(key_prefix):
         st.dataframe(styled1, use_container_width=True, hide_index=True)
         return
 
-    # ── 직접 입력 모드: 기간 필터 버튼 ──
-    def cb_filter_all():
-        st.session_state.filter_mode = "전체"
-        st.session_state.filter_year = today.year
-        st.session_state.filter_month = today.month
-        st.session_state.filter_week = 1
-
-    def cb_year_left():
-        st.session_state.filter_year -= 1
-        st.session_state.filter_mode = "기간"
-
-    def cb_year_right():
-        st.session_state.filter_year += 1
-        st.session_state.filter_mode = "기간"
-
-    def cb_year_label():
-        st.session_state.filter_mode = "기간"
-
-    def cb_month_left():
-        st.session_state.filter_month -= 1
-        if st.session_state.filter_month < 1:
-            st.session_state.filter_month = 12
-            st.session_state.filter_year -= 1
-        st.session_state.filter_mode = "기간"
-
-    def cb_month_right():
-        st.session_state.filter_month += 1
-        if st.session_state.filter_month > 12:
-            st.session_state.filter_month = 1
-            st.session_state.filter_year += 1
-        st.session_state.filter_mode = "기간"
-
-    def cb_month_label():
-        st.session_state.filter_mode = "기간"
-
-    def cb_week_left():
-        st.session_state.filter_week -= 1
-        if st.session_state.filter_week < 1:
-            st.session_state.filter_month -= 1
-            if st.session_state.filter_month < 1:
-                st.session_state.filter_month = 12
-                st.session_state.filter_year -= 1
-            st.session_state.filter_week = get_max_weeks(st.session_state.filter_year, st.session_state.filter_month)
-        st.session_state.filter_mode = "기간"
-
-    def cb_week_right():
-        max_w = get_max_weeks(st.session_state.filter_year, st.session_state.filter_month)
-        st.session_state.filter_week += 1
-        if st.session_state.filter_week > max_w:
-            st.session_state.filter_week = 1
-            st.session_state.filter_month += 1
-            if st.session_state.filter_month > 12:
-                st.session_state.filter_month = 1
-                st.session_state.filter_year += 1
-        st.session_state.filter_mode = "기간"
-
-    def cb_week_label():
-        st.session_state.filter_mode = "기간"
-
     st.subheader("회원 수 데이터")
 
-    c_all, c_year, c_month, c_week = st.columns(4)
-
-    with c_all:
-        st.button("전체", key=f"{key_prefix}_filter_all", use_container_width=True, on_click=cb_filter_all)
-
-    with c_year:
-        yl, ylabel, yr = st.columns([1, 3, 1])
-        with yl:
-            st.button("◀", key=f"{key_prefix}_year_left", use_container_width=True, on_click=cb_year_left)
-        with ylabel:
-            st.button(f"{st.session_state.filter_year}년", key=f"{key_prefix}_year_label", use_container_width=True, on_click=cb_year_label)
-        with yr:
-            st.button("▶", key=f"{key_prefix}_year_right", use_container_width=True, on_click=cb_year_right)
-
-    with c_month:
-        ml, mlabel, mr = st.columns([1, 3, 1])
-        with ml:
-            st.button("◀", key=f"{key_prefix}_month_left", use_container_width=True, on_click=cb_month_left)
-        with mlabel:
-            st.button(f"{st.session_state.filter_month}월", key=f"{key_prefix}_month_label", use_container_width=True, on_click=cb_month_label)
-        with mr:
-            st.button("▶", key=f"{key_prefix}_month_right", use_container_width=True, on_click=cb_month_right)
-
-    with c_week:
-        wl, wlabel, wr = st.columns([1, 3, 1])
-        with wl:
-            st.button("◀", key=f"{key_prefix}_week_left", use_container_width=True, on_click=cb_week_left)
-        with wlabel:
-            st.button(f"{st.session_state.filter_week}주차", key=f"{key_prefix}_week_label", use_container_width=True, on_click=cb_week_label)
-        with wr:
-            st.button("▶", key=f"{key_prefix}_week_right", use_container_width=True, on_click=cb_week_right)
-
-    f_mode = st.session_state.filter_mode
-
-    if f_mode == "전체":
-        if st.session_state.member_data:
-            all_dates = sorted(st.session_state.member_data.keys())
-            range_start = pd.Timestamp(all_dates[0])
-            range_end = pd.Timestamp(all_dates[-1])
-        else:
-            range_start = pd.Timestamp(today - timedelta(days=9))
-            range_end = pd.Timestamp(today)
-    else:
-        w_start, w_end = get_week_range(st.session_state.filter_year, st.session_state.filter_month, st.session_state.filter_week)
-        range_start = pd.Timestamp(w_start)
-        range_end = pd.Timestamp(w_end)
-
+    range_start, range_end = get_filter_date_range()
     dates = pd.date_range(start=range_start, end=range_end)
     n = len(dates)
 
@@ -669,15 +543,14 @@ def render_ads_section(key_prefix):
         errors="coerce"
     )
 
-    # ── 날짜 범위 필터링 ──
-    ads_start = pd.Timestamp(st.session_state.ads_date_start)
-    ads_end = pd.Timestamp(st.session_state.ads_date_end)
+    # ── 날짜 범위 필터링 (공용 필터 사용) ──
+    range_start, range_end = get_filter_date_range()
     df_ads = df_ads[
-        (df_ads[date_col] >= ads_start) & (df_ads[date_col] <= ads_end)
+        (df_ads[date_col] >= range_start) & (df_ads[date_col] <= range_end)
     ]
 
     if df_ads.empty:
-        st.warning(f"선택한 날짜 범위({ads_start.strftime('%Y-%m-%d')} ~ {ads_end.strftime('%Y-%m-%d')})에 해당하는 데이터가 없습니다.")
+        st.warning(f"선택한 날짜 범위({range_start.strftime('%Y-%m-%d')} ~ {range_end.strftime('%Y-%m-%d')})에 해당하는 데이터가 없습니다.")
         return
 
     # ── 3-1. 상품 버튼 시스템 ──
@@ -830,6 +703,116 @@ def render_ads_section(key_prefix):
     with sub_meta:
         st.info("META 광고 데이터 분석 준비 중입니다.")
 
+
+# ─────────────────────────────────────────────
+# 공용 날짜 필터 (탭 위)
+# ─────────────────────────────────────────────
+
+def cb_filter_all():
+    st.session_state.filter_mode = "전체"
+    st.session_state.filter_year = today.year
+    st.session_state.filter_month = today.month
+    st.session_state.filter_week = 1
+
+def cb_year_left():
+    st.session_state.filter_year -= 1
+    st.session_state.filter_mode = "기간"
+
+def cb_year_right():
+    st.session_state.filter_year += 1
+    st.session_state.filter_mode = "기간"
+
+def cb_year_label():
+    st.session_state.filter_mode = "기간"
+
+def cb_month_left():
+    st.session_state.filter_month -= 1
+    if st.session_state.filter_month < 1:
+        st.session_state.filter_month = 12
+        st.session_state.filter_year -= 1
+    st.session_state.filter_mode = "기간"
+
+def cb_month_right():
+    st.session_state.filter_month += 1
+    if st.session_state.filter_month > 12:
+        st.session_state.filter_month = 1
+        st.session_state.filter_year += 1
+    st.session_state.filter_mode = "기간"
+
+def cb_month_label():
+    st.session_state.filter_mode = "기간"
+
+def cb_week_left():
+    st.session_state.filter_week -= 1
+    if st.session_state.filter_week < 1:
+        st.session_state.filter_month -= 1
+        if st.session_state.filter_month < 1:
+            st.session_state.filter_month = 12
+            st.session_state.filter_year -= 1
+        st.session_state.filter_week = get_max_weeks(st.session_state.filter_year, st.session_state.filter_month)
+    st.session_state.filter_mode = "기간"
+
+def cb_week_right():
+    max_w = get_max_weeks(st.session_state.filter_year, st.session_state.filter_month)
+    st.session_state.filter_week += 1
+    if st.session_state.filter_week > max_w:
+        st.session_state.filter_week = 1
+        st.session_state.filter_month += 1
+        if st.session_state.filter_month > 12:
+            st.session_state.filter_month = 1
+            st.session_state.filter_year += 1
+    st.session_state.filter_mode = "기간"
+
+def cb_week_label():
+    st.session_state.filter_mode = "기간"
+
+
+def get_filter_date_range():
+    """공용 날짜 범위 계산"""
+    f_mode = st.session_state.filter_mode
+    if f_mode == "전체":
+        if st.session_state.member_data:
+            all_dates = sorted(st.session_state.member_data.keys())
+            return pd.Timestamp(all_dates[0]), pd.Timestamp(all_dates[-1])
+        else:
+            return pd.Timestamp(today - timedelta(days=9)), pd.Timestamp(today)
+    else:
+        w_start, w_end = get_week_range(st.session_state.filter_year, st.session_state.filter_month, st.session_state.filter_week)
+        return pd.Timestamp(w_start), pd.Timestamp(w_end)
+
+
+# 필터 버튼 UI
+c_all, c_year, c_month, c_week = st.columns(4)
+
+with c_all:
+    st.button("전체", key="global_filter_all", use_container_width=True, on_click=cb_filter_all)
+
+with c_year:
+    yl, ylabel, yr = st.columns([1, 3, 1])
+    with yl:
+        st.button("◀", key="global_year_left", use_container_width=True, on_click=cb_year_left)
+    with ylabel:
+        st.button(f"{st.session_state.filter_year}년", key="global_year_label", use_container_width=True, on_click=cb_year_label)
+    with yr:
+        st.button("▶", key="global_year_right", use_container_width=True, on_click=cb_year_right)
+
+with c_month:
+    ml, mlabel, mr = st.columns([1, 3, 1])
+    with ml:
+        st.button("◀", key="global_month_left", use_container_width=True, on_click=cb_month_left)
+    with mlabel:
+        st.button(f"{st.session_state.filter_month}월", key="global_month_label", use_container_width=True, on_click=cb_month_label)
+    with mr:
+        st.button("▶", key="global_month_right", use_container_width=True, on_click=cb_month_right)
+
+with c_week:
+    wl, wlabel, wr = st.columns([1, 3, 1])
+    with wl:
+        st.button("◀", key="global_week_left", use_container_width=True, on_click=cb_week_left)
+    with wlabel:
+        st.button(f"{st.session_state.filter_week}주차", key="global_week_label", use_container_width=True, on_click=cb_week_label)
+    with wr:
+        st.button("▶", key="global_week_right", use_container_width=True, on_click=cb_week_right)
 
 # ─────────────────────────────────────────────
 # 상단 탭 네비게이션 + 콘텐츠
