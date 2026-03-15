@@ -428,7 +428,8 @@ def render_member_section(key_prefix):
         naver_col = [c for c in df_mem.columns if "네이버" in c][0]
         sales_col = [c for c in df_mem.columns if "매출" in c][0]
 
-        st.subheader("회원 수 데이터")
+        _ms, _me = get_filter_date_range()
+        st.subheader(f"회원 수 데이터 　{_ms.strftime('%y.%m.%d')} ~ {_me.strftime('%y.%m.%d')}")
         rows1 = []
         for _, r in df_sorted.iterrows():
             delta_cnt = int(r["전일비 증감(명)"])
@@ -446,7 +447,8 @@ def render_member_section(key_prefix):
         st.dataframe(styled1, use_container_width=True, hide_index=True)
         return
 
-    st.subheader("회원 수 데이터")
+    _ms2, _me2 = get_filter_date_range()
+    st.subheader(f"회원 수 데이터 　{_ms2.strftime('%y.%m.%d')} ~ {_me2.strftime('%y.%m.%d')}")
 
     range_start, range_end = get_filter_date_range()
     dates = pd.date_range(start=range_start, end=range_end)
@@ -520,7 +522,8 @@ def render_member_section(key_prefix):
 # ═════════════════════════════════════════════
 
 def render_ads_section(key_prefix):
-    st.subheader("광고 데이터 분석")
+    _ads_s, _ads_e = get_filter_date_range()
+    st.subheader(f"광고 데이터 분석 　{_ads_s.strftime('%y.%m.%d')} ~ {_ads_e.strftime('%y.%m.%d')}")
 
     if not st.session_state.ads_confirmed:
         return
@@ -666,29 +669,60 @@ def render_ads_section(key_prefix):
 
         df_display = df_sub[display_cols].copy()
 
-        # 날짜 포맷팅
-        df_display[date_col] = df_display[date_col].apply(
-            lambda x: x.strftime("%Y-%m-%d") if pd.notna(x) else ""
-        )
-
         # 컬럼명 정리: 첫 열을 "일자"로 표시
         rename_map = {date_col: "일자"}
         df_display = df_display.rename(columns=rename_map)
 
-        # 숫자 포맷팅
+        # ── 합계행 계산 (포맷팅 전, 숫자 상태에서) ──
+        # 평균 컬럼: CPC, CPA, AOV, ROAS, CTR 등 비율/단가 지표
+        # 합계 컬럼: 결과, 총비용, 구매완료수, 매출, 장바구니 등 절대값 지표
+        avg_keywords = ["CPC", "CPM", "CPA", "AOV", "ROAS", "CTR", "율", "결과당"]
+        summary = {"일자": "합계"}
         for c in df_display.columns:
             if c == "일자":
                 continue
-            if c in ["CPA", "AOV"]:
-                df_display[c] = df_display[c].apply(lambda x: fmt_money(x) if pd.notna(x) else "")
-            elif c == "ROAS":
-                df_display[c] = df_display[c].apply(lambda x: fmt_pct(x, 1) if pd.notna(x) else "")
-            elif "비용" in c or "매출" in c or "CPC" in c or "CPM" in c or "결과당" in c:
-                df_display[c] = df_display[c].apply(lambda x: fmt_money(x) if pd.notna(x) else "")
-            elif "CTR" in c or "율" in c:
-                df_display[c] = df_display[c].apply(lambda x: fmt_pct(x) if pd.notna(x) else "")
+            vals = pd.to_numeric(df_display[c], errors="coerce")
+            if any(k in c for k in avg_keywords):
+                summary[c] = vals.mean()
             else:
-                df_display[c] = df_display[c].apply(lambda x: fmt_number(x) if pd.notna(x) else "")
+                summary[c] = vals.sum()
+
+        # 날짜 포맷팅
+        df_display["일자"] = df_display["일자"].apply(
+            lambda x: x.strftime("%Y-%m-%d") if hasattr(x, "strftime") else str(x) if pd.notna(x) else ""
+        )
+
+        # 숫자 포맷팅 함수
+        def format_col(c, x):
+            if pd.isna(x):
+                return ""
+            if c in ["CPA", "AOV"]:
+                return fmt_money(x)
+            elif c == "ROAS":
+                return fmt_pct(x, 1)
+            elif "비용" in c or "매출" in c or "CPC" in c or "CPM" in c or "결과당" in c:
+                return fmt_money(x)
+            elif "CTR" in c or "율" in c:
+                return fmt_pct(x)
+            else:
+                return fmt_number(x)
+
+        # 합계행 포맷팅
+        summary_formatted = {"일자": "합계"}
+        for c in df_display.columns:
+            if c == "일자":
+                continue
+            summary_formatted[c] = format_col(c, summary[c])
+
+        # 데이터 행 포맷팅
+        for c in df_display.columns:
+            if c == "일자":
+                continue
+            df_display[c] = df_display[c].apply(lambda x: format_col(c, x))
+
+        # 합계행 추가
+        summary_row = pd.DataFrame([summary_formatted])
+        df_display = pd.concat([df_display, summary_row], ignore_index=True)
 
         st.dataframe(df_display, use_container_width=True, hide_index=True)
 
