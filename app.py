@@ -841,7 +841,8 @@ with tab_ads:
     render_ads_section("ads")
 
 with tab_analysis:
-    st.subheader("광고 데이터 분석")
+    _an_start, _an_end = get_filter_date_range()
+    st.subheader(f"광고 데이터 분석 　{_an_start.strftime('%y.%m.%d')} ~ {_an_end.strftime('%y.%m.%d')}")
 
     df_raw = st.session_state.ads_raw_data
     if df_raw is None or not st.session_state.ads_confirmed:
@@ -897,7 +898,14 @@ with tab_analysis:
 
                 if daily_all is not None and len(daily_all) >= 1:
                     last = daily_all.iloc[-1]
+                    last_date = daily_all.index[-1]
                     prev = daily_all.iloc[-2] if len(daily_all) >= 2 else None
+                    prev_date = daily_all.index[-2] if len(daily_all) >= 2 else None
+
+                    if prev_date is not None:
+                        st.caption(f"기준: {last_date.strftime('%m/%d')} vs 전일 {prev_date.strftime('%m/%d')}")
+                    else:
+                        st.caption(f"기준: {last_date.strftime('%m/%d')} (전일 데이터 없음)")
 
                     card_cols = st.columns(5)
                     metrics = [
