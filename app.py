@@ -724,7 +724,14 @@ def render_ads_section(key_prefix):
         summary_row = pd.DataFrame([summary_formatted])
         df_display = pd.concat([df_display, summary_row], ignore_index=True)
 
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        # 합계행 스타일링
+        def style_summary_row(row):
+            if row.name == len(df_display) - 1:
+                return ["background-color: #1a1a2e; font-weight: bold; border-top: 2px solid #e74c3c"] * len(row)
+            return [""] * len(row)
+
+        styled_display = df_display.style.apply(style_summary_row, axis=1)
+        st.dataframe(styled_display, use_container_width=True, hide_index=True)
 
     with sub_all:
         render_ads_table(df_filtered.copy(), f"{key_prefix}_all")
