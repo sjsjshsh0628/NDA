@@ -516,6 +516,49 @@ def render_member_section(key_prefix):
     styled = result.style.map(color_delta, subset=delta_cols)
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
+    # ── 편집 모드 ──
+    if f"{key_prefix}_edit_mode" not in st.session_state:
+        st.session_state[f"{key_prefix}_edit_mode"] = False
+
+    def toggle_edit():
+        st.session_state[f"{key_prefix}_edit_mode"] = not st.session_state[f"{key_prefix}_edit_mode"]
+
+    edit_label = "편집 닫기" if st.session_state[f"{key_prefix}_edit_mode"] else "데이터 편집"
+    st.button(edit_label, key=f"{key_prefix}_edit_btn", on_click=toggle_edit)
+
+    if st.session_state[f"{key_prefix}_edit_mode"]:
+        edit_df = pd.DataFrame({
+            "일자": df["일자"],
+            "네이버 관심고객수": pd.to_numeric(df["nv_cust"], errors="coerce"),
+            "네이버 매출": pd.to_numeric(df["nv_rev"], errors="coerce"),
+            "자사몰 회원수": pd.to_numeric(df["js_mem"], errors="coerce"),
+            "자사몰 매출": pd.to_numeric(df["js_rev"], errors="coerce"),
+        })
+
+        edited = st.data_editor(
+            edit_df,
+            use_container_width=True,
+            hide_index=True,
+            disabled=["일자"],
+            key=f"{key_prefix}_editor",
+            num_rows="fixed",
+        )
+
+        if st.button("저장", key=f"{key_prefix}_save_btn", type="primary", use_container_width=True):
+            for _, row in edited.iterrows():
+                d_str = str(row["일자"])
+                nv_c = int(row["네이버 관심고객수"]) if pd.notna(row["네이버 관심고객수"]) else 0
+                nv_r = int(row["네이버 매출"]) if pd.notna(row["네이버 매출"]) else 0
+                js_m = int(row["자사몰 회원수"]) if pd.notna(row["자사몰 회원수"]) else 0
+                js_r = int(row["자사몰 매출"]) if pd.notna(row["자사몰 매출"]) else 0
+                st.session_state.member_data[d_str] = {
+                    "nv_cust": nv_c, "nv_rev": nv_r, "js_mem": js_m, "js_rev": js_r,
+                }
+                save_member_day(d_str, nv_c, nv_r, js_m, js_r)
+            st.session_state[f"{key_prefix}_edit_mode"] = False
+            st.success("저장 완료!")
+            st.rerun()
+
 
 # ═════════════════════════════════════════════
 # 광고 데이터 렌더링 함수
