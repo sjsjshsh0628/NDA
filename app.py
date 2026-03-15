@@ -1,6 +1,7 @@
 import streamlit as st
 import streamlit_authenticator as stauth
 import pandas as pd
+import sqlite3
 import json
 import os
 import io
@@ -45,23 +46,95 @@ elif st.session_state.get("authentication_status") is None:
     st.stop()
 
 # ─────────────────────────────────────────────
-# 헬퍼 함수
+# DB 초기화
 # ─────────────────────────────────────────────
 
-PRODUCTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "products.json")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.db")
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS products (
+            name TEXT PRIMARY KEY
+        );
+        CREATE TABLE IF NOT EXISTS member_data (
+            date TEXT PRIMARY KEY,
+            nv_cust INTEGER,
+            nv_rev INTEGER,
+            js_mem INTEGER,
+            js_rev INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS ads_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_json TEXT,
+            uploaded_at TEXT
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+# ─────────────────────────────────────────────
+# 헬퍼 함수 — DB
+# ─────────────────────────────────────────────
 
 
 def load_products():
-    try:
-        with open(PRODUCTS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+    conn = get_db()
+    rows = conn.execute("SELECT name FROM products ORDER BY name").fetchall()
+    conn.close()
+    return [r[0] for r in rows]
 
 
 def save_products(lst):
-    with open(PRODUCTS_PATH, "w", encoding="utf-8") as f:
-        json.dump(lst, f, ensure_ascii=False, indent=2)
+    conn = get_db()
+    conn.execute("DELETE FROM products")
+    conn.executemany("INSERT OR IGNORE INTO products (name) VALUES (?)", [(p,) for p in lst])
+    conn.commit()
+    conn.close()
+
+
+def load_member_data():
+    conn = get_db()
+    rows = conn.execute("SELECT date, nv_cust, nv_rev, js_mem, js_rev FROM member_data").fetchall()
+    conn.close()
+    return {r[0]: {"nv_cust": r[1], "nv_rev": r[2], "js_mem": r[3], "js_rev": r[4]} for r in rows}
+
+
+def save_member_day(d_str, nv_cust, nv_rev, js_mem, js_rev):
+    conn = get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO member_data (date, nv_cust, nv_rev, js_mem, js_rev) VALUES (?,?,?,?,?)",
+        (d_str, nv_cust, nv_rev, js_mem, js_rev),
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_ads_data(df):
+    conn = get_db()
+    conn.execute("DELETE FROM ads_data")
+    conn.execute("INSERT INTO ads_data (data_json) VALUES (?)", (df.to_json(force_ascii=False),))
+    conn.commit()
+    conn.close()
+
+
+def load_ads_data():
+    conn = get_db()
+    row = conn.execute("SELECT data_json FROM ads_data ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    if row:
+        return pd.read_json(io.StringIO(row[0]))
+    return None
 
 
 def safe_divide(a, b):
@@ -150,11 +223,11 @@ def get_max_weeks(year, month):
 # ─────────────────────────────────────────────
 
 if "member_data" not in st.session_state:
-    st.session_state.member_data = {}
+    st.session_state.member_data = load_member_data()
 if "members_confirmed" not in st.session_state:
-    st.session_state.members_confirmed = False
+    st.session_state.members_confirmed = bool(st.session_state.member_data)
 if "ads_confirmed" not in st.session_state:
-    st.session_state.ads_confirmed = False
+    st.session_state.ads_confirmed = st.session_state.ads_raw_data is not None
 
 today = date.today()
 if "filter_mode" not in st.session_state:
@@ -190,7 +263,7 @@ if "product_list" not in st.session_state:
 
 # 광고 데이터 저장
 if "ads_raw_data" not in st.session_state:
-    st.session_state.ads_raw_data = None
+    st.session_state.ads_raw_data = load_ads_data()
 
 # ─────────────────────────────────────────────
 # 사이드바 — 데이터 입력
@@ -257,6 +330,7 @@ with st.sidebar:
                     "js_mem": js_mem_input,
                     "js_rev": js_rev_input,
                 }
+                save_member_day(str(current), nv_cust_input, nv_rev_input, js_mem_input, js_rev_input)
                 current += timedelta(days=1)
             st.session_state.members_confirmed = True
             if d_start == d_end:
@@ -331,6 +405,8 @@ with st.sidebar:
     if st.button("✅ 확인", key="btn_ads", use_container_width=True):
         if mode_ads == "샘플" or df_ads_temp is not None:
             st.session_state.ads_raw_data = df_ads_temp
+            if df_ads_temp is not None:
+                save_ads_data(df_ads_temp)
             # 상품 목록 추출 및 병합
             if df_ads_temp is not None:
                 prod_col = find_col(df_ads_temp, "광고 그룹") or find_col(df_ads_temp, "광고그룹") or find_col(df_ads_temp, "상품명")
