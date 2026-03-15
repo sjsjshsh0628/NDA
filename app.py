@@ -148,9 +148,12 @@ def safe_divide(a, b):
         return 0
 
 
-def find_col(df, *keywords):
+def find_col(df, *keywords, exclude=None):
     for c in df.columns:
-        if all(k in str(c) for k in keywords):
+        cs = str(c)
+        if all(k in cs for k in keywords):
+            if exclude and any(e in cs for e in exclude):
+                continue
             return c
     return None
 
@@ -534,8 +537,8 @@ def render_ads_section(key_prefix):
     cost_col = find_col(df_ads, "총비용") or find_col(df_ads, "총 비용")
     purchase_col = find_col(df_ads, "구매완료수") or find_col(df_ads, "구매전환수")
     purchase_rev_col = find_col(df_ads, "구매완료 전환 매출") or find_col(df_ads, "구매완료", "매출") or find_col(df_ads, "총구매전환매출")
-    prod_col = find_col(df_ads, "광고 그룹") or find_col(df_ads, "광고그룹") or find_col(df_ads, "상품명")
-    campaign_col = find_col(df_ads, "캠페인")
+    prod_col = find_col(df_ads, "광고 그룹", exclude=["ID", "Id"]) or find_col(df_ads, "광고그룹", exclude=["ID", "Id"]) or find_col(df_ads, "상품명")
+    campaign_col = find_col(df_ads, "캠페인", exclude=["ID", "Id"])
 
     # 날짜 정규화
     df_ads[date_col] = pd.to_datetime(
@@ -613,8 +616,9 @@ def render_ads_section(key_prefix):
 
     # ── 상품 필터링 ──
     selected = st.session_state.selected_product
-    if selected and prod_col:
-        df_filtered = df_ads[df_ads[prod_col].astype(str).str.contains(selected, na=False)]
+    if selected and prod_col and prod_col in df_ads.columns:
+        mask = df_ads[prod_col].astype(str).str.contains(selected, case=False, na=False, regex=False)
+        df_filtered = df_ads[mask]
     else:
         df_filtered = df_ads
 
