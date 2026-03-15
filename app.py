@@ -724,14 +724,19 @@ def render_ads_section(key_prefix):
         summary_row = pd.DataFrame([summary_formatted])
         df_display = pd.concat([df_display, summary_row], ignore_index=True)
 
-        # 합계행 스타일링
-        def style_summary_row(row):
-            if row.name == len(df_display) - 1:
-                return ["background-color: #1a1a2e; font-weight: bold; border-top: 2px solid #e74c3c"] * len(row)
-            return [""] * len(row)
+        # 합계행 분리: 데이터 테이블 + 합계 테이블 고정 표시
+        df_data = df_display.iloc[:-1]
+        df_summary = df_display.iloc[[-1]]
 
-        styled_display = df_display.style.apply(style_summary_row, axis=1)
-        st.dataframe(styled_display, use_container_width=True, hide_index=True)
+        st.dataframe(df_data, use_container_width=True, hide_index=True)
+
+        # 합계행을 HTML로 렌더링 (라이트/다크 모드 모두 대응)
+        summary_html = "<div style='overflow-x:auto;'><table style='width:100%; border-collapse:collapse; font-size:14px;'><tr>"
+        for c in df_summary.columns:
+            val = df_summary.iloc[0][c]
+            summary_html += f"<td style='padding:8px 12px; font-weight:bold; border-top:2px solid #e74c3c; background-color:rgba(231,76,60,0.1);'>{val}</td>"
+        summary_html += "</tr></table></div>"
+        st.markdown(summary_html, unsafe_allow_html=True)
 
     with sub_all:
         render_ads_table(df_filtered.copy(), f"{key_prefix}_all")
