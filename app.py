@@ -724,19 +724,14 @@ def render_ads_section(key_prefix):
         summary_row = pd.DataFrame([summary_formatted])
         df_display = pd.concat([df_display, summary_row], ignore_index=True)
 
-        # 합계행 분리: 데이터 테이블 + 합계 테이블 고정 표시
-        df_data = df_display.iloc[:-1]
-        df_summary = df_display.iloc[[-1]]
+        # 합계행 스타일링 (같은 dataframe 안에서 배경색 구분)
+        def highlight_summary(row):
+            if row["일자"] == "합계":
+                return ["background-color: rgba(231,76,60,0.15); font-weight: bold"] * len(row)
+            return [""] * len(row)
 
-        st.dataframe(df_data, use_container_width=True, hide_index=True)
-
-        # 합계행을 HTML로 렌더링 (라이트/다크 모드 모두 대응)
-        summary_html = "<div style='overflow-x:auto;'><table style='width:100%; border-collapse:collapse; font-size:14px;'><tr>"
-        for c in df_summary.columns:
-            val = df_summary.iloc[0][c]
-            summary_html += f"<td style='padding:8px 12px; font-weight:bold; border-top:2px solid #e74c3c; background-color:rgba(231,76,60,0.1);'>{val}</td>"
-        summary_html += "</tr></table></div>"
-        st.markdown(summary_html, unsafe_allow_html=True)
+        styled_display = df_display.style.apply(highlight_summary, axis=1)
+        st.dataframe(styled_display, use_container_width=True, hide_index=True)
 
     with sub_all:
         render_ads_table(df_filtered.copy(), f"{key_prefix}_all")
