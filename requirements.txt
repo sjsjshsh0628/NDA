@@ -2,3 +2,6 @@ streamlit
 pandas
 openpyxl
 plotly
+streamlit-authenticator
+pyyaml
+bcrypt
