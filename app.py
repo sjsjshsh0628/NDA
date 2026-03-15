@@ -726,14 +726,17 @@ def render_ads_section(key_prefix):
 
         # 합계행 분리
         df_data = df_display.iloc[:-1]
-        df_summary = df_display.iloc[[-1]]
+        summary_vals = df_display.iloc[-1]
 
-        # 합계행을 테이블 위에 배치 (스크롤해도 항상 보임)
-        def highlight_summary(row):
-            return ["background-color: rgba(231,76,60,0.15); font-weight: bold"] * len(row)
-
-        styled_summary = df_summary.style.apply(highlight_summary, axis=1)
-        st.dataframe(styled_summary, use_container_width=True, hide_index=True, height=38)
+        # 합계 카드 표시 (테이블 위에 고정)
+        sum_cols = [c for c in df_display.columns if c != "일자"]
+        with st.container():
+            st.markdown(
+                "<div style='padding:8px 12px; background:rgba(231,76,60,0.1); border-left:3px solid #e74c3c; border-radius:4px; margin-bottom:4px;'>"
+                + " &nbsp;|&nbsp; ".join([f"<b>{c}</b> {summary_vals[c]}" for c in sum_cols])
+                + "</div>",
+                unsafe_allow_html=True,
+            )
 
         st.dataframe(df_data, use_container_width=True, hide_index=True)
 
