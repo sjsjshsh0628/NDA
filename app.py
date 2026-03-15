@@ -823,24 +823,10 @@ with c_week:
     with wr:
         st.button("▶", key="global_week_right", use_container_width=True, on_click=cb_week_right)
 
-# ─────────────────────────────────────────────
-# 상단 탭 네비게이션 + 콘텐츠
-# ─────────────────────────────────────────────
 
-tab_all, tab_members, tab_ads, tab_analysis = st.tabs(["전체", "회원현황", "광고 데이터", "광고 데이터 분석"])
-
-with tab_all:
-    render_member_section("all_m")
-    st.divider()
-    render_ads_section("all_a")
-    st.divider()
-    render_analysis_section("all_an")
-
-with tab_members:
-    render_member_section("mem")
-
-with tab_ads:
-    render_ads_section("ads")
+# ═════════════════════════════════════════════
+# 광고 데이터 분석 렌더링 함수
+# ═════════════════════════════════════════════
 
 def render_analysis_section(key_prefix):
     _an_start, _an_end = get_filter_date_range()
@@ -1056,6 +1042,25 @@ def render_analysis_section(key_prefix):
     else:
         st.warning("총비용, 구매완료수, 매출 컬럼을 찾을 수 없습니다.")
 
+
+# ─────────────────────────────────────────────
+# 상단 탭 네비게이션 + 콘텐츠
+# ─────────────────────────────────────────────
+
+tab_all, tab_members, tab_ads, tab_analysis = st.tabs(["전체", "회원현황", "광고 데이터", "광고 데이터 분석"])
+
+with tab_all:
+    render_member_section("all_m")
+    st.divider()
+    render_ads_section("all_a")
+    st.divider()
+    render_analysis_section("all_an")
+
+with tab_members:
+    render_member_section("mem")
+
+with tab_ads:
+    render_ads_section("ads")
 
 with tab_analysis:
     render_analysis_section("analysis")
