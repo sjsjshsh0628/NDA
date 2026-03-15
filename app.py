@@ -1,7 +1,14 @@
 import streamlit as st
+import streamlit_authenticator as stauth
 import pandas as pd
+import json
+import os
 import io
+import yaml
+import calendar
+from yaml.loader import SafeLoader
 from typing import Optional
+from datetime import date, timedelta
 
 st.set_page_config(
     page_title="일간 마케팅 대시보드",
@@ -9,23 +16,70 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("📊 일간 마케팅 대시보드")
+# ─────────────────────────────────────────────
+# 인증
+# ─────────────────────────────────────────────
+
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
+
+with open(CONFIG_PATH) as f:
+    config = yaml.load(f, Loader=SafeLoader)
+
+authenticator = stauth.Authenticate(
+    config["credentials"],
+    config["cookie"]["name"],
+    config["cookie"]["key"],
+    config["cookie"]["expiry_days"],
+)
+
+try:
+    authenticator.login()
+except Exception as e:
+    st.error(e)
+
+if st.session_state.get("authentication_status") is False:
+    st.error("아이디 또는 비밀번호가 틀렸습니다.")
+    st.stop()
+elif st.session_state.get("authentication_status") is None:
+    st.warning("로그인이 필요합니다.")
+    st.stop()
 
 # ─────────────────────────────────────────────
 # 헬퍼 함수
 # ─────────────────────────────────────────────
 
-def parse_paste(text: str) -> Optional[pd.DataFrame]:
-    """탭/쉼표 구분 텍스트를 DataFrame으로 변환"""
-    text = text.strip()
-    if not text:
-        return None
-    sep = "\t" if "\t" in text else ","
+PRODUCTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "products.json")
+
+
+def load_products():
     try:
-        return pd.read_csv(io.StringIO(text), sep=sep)
-    except Exception as e:
-        st.error(f"붙여넣기 파싱 오류: {e}")
-        return None
+        with open(PRODUCTS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def save_products(lst):
+    with open(PRODUCTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(lst, f, ensure_ascii=False, indent=2)
+
+
+def safe_divide(a, b):
+    try:
+        a = float(a)
+        b = float(b)
+        if b == 0:
+            return 0
+        return a / b
+    except (ValueError, TypeError):
+        return 0
+
+
+def find_col(df, *keywords):
+    for c in df.columns:
+        if all(k in str(c) for k in keywords):
+            return c
+    return None
 
 
 def load_file(uploaded) -> Optional[pd.DataFrame]:
@@ -42,7 +96,6 @@ def load_file(uploaded) -> Optional[pd.DataFrame]:
 
 
 def color_delta(val):
-    """양수=초록, 음수=빨강"""
     try:
         v = float(str(val).replace(",", "").replace("%", "").replace("+", ""))
         if v > 0:
@@ -75,229 +128,662 @@ def fmt_pct(n, decimals=1):
         return str(n)
 
 
+def get_week_range(year, month, week):
+    first_day = date(year, month, 1)
+    first_sunday = first_day - timedelta(days=(first_day.weekday() + 1) % 7)
+    week_start = first_sunday + timedelta(weeks=week - 1)
+    week_end = week_start + timedelta(days=6)
+    return week_start, week_end
+
+
+def get_max_weeks(year, month):
+    _, last_day = calendar.monthrange(year, month)
+    last_date = date(year, month, last_day)
+    first_date = date(year, month, 1)
+    first_sunday = first_date - timedelta(days=(first_date.weekday() + 1) % 7)
+    weeks = ((last_date - first_sunday).days // 7) + 1
+    return max(1, weeks)
+
+
+# ─────────────────────────────────────────────
+# session_state 초기화
+# ─────────────────────────────────────────────
+
+if "member_data" not in st.session_state:
+    st.session_state.member_data = {}
+if "members_confirmed" not in st.session_state:
+    st.session_state.members_confirmed = False
+if "ads_confirmed" not in st.session_state:
+    st.session_state.ads_confirmed = False
+
+today = date.today()
+if "filter_mode" not in st.session_state:
+    st.session_state.filter_mode = "전체"
+if "filter_year" not in st.session_state:
+    st.session_state.filter_year = today.year
+if "filter_month" not in st.session_state:
+    st.session_state.filter_month = today.month
+if "filter_week" not in st.session_state:
+    st.session_state.filter_week = 1
+
+# 날짜 모드 session_state
+if "member_date_mode" not in st.session_state:
+    st.session_state.member_date_mode = "오늘"
+if "member_date_start" not in st.session_state:
+    st.session_state.member_date_start = today
+if "member_date_end" not in st.session_state:
+    st.session_state.member_date_end = today
+if "ads_date_mode" not in st.session_state:
+    st.session_state.ads_date_mode = "오늘"
+if "ads_date_start" not in st.session_state:
+    st.session_state.ads_date_start = today
+if "ads_date_end" not in st.session_state:
+    st.session_state.ads_date_end = today
+
+# 상품 관련
+if "selected_product" not in st.session_state:
+    st.session_state.selected_product = None
+if "adding_product" not in st.session_state:
+    st.session_state.adding_product = False
+if "product_list" not in st.session_state:
+    st.session_state.product_list = load_products()
+
+# 광고 데이터 저장
+if "ads_raw_data" not in st.session_state:
+    st.session_state.ads_raw_data = None
+
 # ─────────────────────────────────────────────
 # 사이드바 — 데이터 입력
 # ─────────────────────────────────────────────
 
 with st.sidebar:
+    st.caption(f"👤 {st.session_state.get('name', '')}")
+    authenticator.logout("로그아웃", "sidebar")
+    st.divider()
     st.header("📥 데이터 입력")
 
-    df_members: Optional[pd.DataFrame] = None
-    df_ads: Optional[pd.DataFrame] = None
+    direct_input_mode = False
+    df_members_file = None
 
     # ── 입력1: 회원 현황 ──
-    st.subheader("입력1 — 자사몰·네이버 회원 현황")
+    st.subheader("입력1 — 회원 현황")
     mode_members = st.radio(
         "입력 방식",
-        ["직접 붙여넣기", "파일 업로드", "샘플"],
+        ["직접 입력", "파일 업로드", "샘플"],
         horizontal=True,
         key="mode_members",
     )
-    if mode_members == "직접 붙여넣기":
-        st.caption("Excel에서 범위 복사(Ctrl+C) 후 아래에 붙여넣기(Ctrl+V)")
-        MEMBERS_PLACEHOLDER = (
-            "날짜\t자사몰 회원수\t네이버 관심고객 증감율(%)\t자사몰 당일 매출\n"
-            "2026-03-14\t12810\t2.1\t6450000\n"
-            "2026-03-15\t12905\t1.8\t7120000"
-        )
-        txt1 = st.text_area(
-            "회원 현황 붙여넣기",
-            height=160,
-            key="txt1",
-            placeholder=MEMBERS_PLACEHOLDER,
-        )
-        df_members = parse_paste(txt1) if txt1.strip() else None
+
+    if mode_members == "직접 입력":
+        direct_input_mode = True
+
+        # 날짜 선택: 오늘 / 직접 입력
+        def cb_member_date_today():
+            st.session_state.member_date_mode = "오늘"
+            st.session_state.member_date_start = today
+            st.session_state.member_date_end = today
+
+        def cb_member_date_custom():
+            st.session_state.member_date_mode = "직접 입력"
+
+        mc1, mc2 = st.columns(2)
+        with mc1:
+            st.button("오늘", key="btn_member_date_today", use_container_width=True, on_click=cb_member_date_today,
+                       type="primary" if st.session_state.member_date_mode == "오늘" else "secondary")
+        with mc2:
+            st.button("직접 입력", key="btn_member_date_custom", use_container_width=True, on_click=cb_member_date_custom,
+                       type="primary" if st.session_state.member_date_mode == "직접 입력" else "secondary")
+
+        if st.session_state.member_date_mode == "직접 입력":
+            st.session_state.member_date_start = st.date_input("시작일자", value=st.session_state.member_date_start, key="member_start")
+            st.session_state.member_date_end = st.date_input("종료일자", value=st.session_state.member_date_end, key="member_end")
+
+        st.markdown("**네이버**")
+        nv_cust_input = st.number_input("관심고객수", min_value=0, step=1, value=0, key="nv_cust")
+        nv_rev_input = st.number_input("매출", min_value=0, step=1, value=0, key="nv_rev")
+
+        st.markdown("**자사몰**")
+        js_mem_input = st.number_input("회원수", min_value=0, step=1, value=0, key="js_mem")
+        js_rev_input = st.number_input("매출", min_value=0, step=1, value=0, key="js_rev")
+
+        if st.button("✅ 확인", key="btn_members", use_container_width=True):
+            d_start = st.session_state.member_date_start
+            d_end = st.session_state.member_date_end
+            current = d_start
+            while current <= d_end:
+                st.session_state.member_data[str(current)] = {
+                    "nv_cust": nv_cust_input,
+                    "nv_rev": nv_rev_input,
+                    "js_mem": js_mem_input,
+                    "js_rev": js_rev_input,
+                }
+                current += timedelta(days=1)
+            st.session_state.members_confirmed = True
+            if d_start == d_end:
+                st.success(f"{d_start} 데이터 입력 완료!")
+            else:
+                st.success(f"{d_start} ~ {d_end} 데이터 입력 완료!")
+
     elif mode_members == "파일 업로드":
         f1 = st.file_uploader("CSV / Excel", type=["csv", "xlsx", "xls"], key="f1")
-        df_members = load_file(f1)
+        df_members_file = load_file(f1)
+        if st.button("✅ 확인", key="btn_members_file", use_container_width=True):
+            if df_members_file is not None:
+                st.session_state.members_confirmed = True
+                st.success("회원 현황 데이터 반영!")
+            else:
+                st.warning("파일을 먼저 업로드하세요.")
     else:
-        try:
-            df_members = pd.read_csv("sample_data/members.csv")
-            st.caption("샘플 데이터 사용 중")
-        except FileNotFoundError:
-            st.error("sample_data/members.csv 없음")
+        if st.button("✅ 확인 (샘플)", key="btn_members_sample", use_container_width=True):
+            st.session_state.members_confirmed = True
+            st.success("샘플 데이터 반영!")
 
     st.divider()
 
-    # ── 입력2: 네이버 광고 ──
-    st.subheader("입력2 — 네이버 광고 로우데이터")
+    # ── 입력2: 광고 데이터 ──
+    st.subheader("광고 데이터")
+
+    # 데이터 구분
+    ads_platform = st.radio(
+        "데이터 구분",
+        ["네이버", "META"],
+        horizontal=True,
+        key="ads_platform",
+    )
+
+    # 날짜 선택: 오늘 / 직접 입력
+    def cb_ads_date_today():
+        st.session_state.ads_date_mode = "오늘"
+        st.session_state.ads_date_start = today
+        st.session_state.ads_date_end = today
+
+    def cb_ads_date_custom():
+        st.session_state.ads_date_mode = "직접 입력"
+
+    ac1, ac2 = st.columns(2)
+    with ac1:
+        st.button("오늘", key="btn_ads_date_today", use_container_width=True, on_click=cb_ads_date_today,
+                   type="primary" if st.session_state.ads_date_mode == "오늘" else "secondary")
+    with ac2:
+        st.button("직접 입력", key="btn_ads_date_custom", use_container_width=True, on_click=cb_ads_date_custom,
+                   type="primary" if st.session_state.ads_date_mode == "직접 입력" else "secondary")
+
+    if st.session_state.ads_date_mode == "직접 입력":
+        st.session_state.ads_date_start = st.date_input("시작일자", value=st.session_state.ads_date_start, key="ads_start")
+        st.session_state.ads_date_end = st.date_input("종료일자", value=st.session_state.ads_date_end, key="ads_end")
+
     mode_ads = st.radio(
         "입력 방식",
-        ["파일 업로드", "직접 붙여넣기", "샘플"],
+        ["파일 업로드", "샘플"],
         horizontal=True,
         key="mode_ads",
     )
+    df_ads_temp = None
     if mode_ads == "파일 업로드":
         f2 = st.file_uploader("CSV / Excel", type=["csv", "xlsx", "xls"], key="f2")
-        df_ads = load_file(f2)
-    elif mode_ads == "직접 붙여넣기":
-        st.caption("헤더 포함, 탭 또는 쉼표 구분")
-        txt2 = st.text_area("광고 데이터 붙여넣기", height=200, key="txt2")
-        df_ads = parse_paste(txt2) if txt2.strip() else None
+        df_ads_temp = load_file(f2)
     else:
         try:
-            df_ads = pd.read_csv("sample_data/naver_ads.csv")
-            st.caption("샘플 데이터 사용 중")
+            df_ads_temp = pd.read_csv("sample_data/naver_ads.csv")
         except FileNotFoundError:
-            st.error("sample_data/naver_ads.csv 없음")
+            df_ads_temp = None
 
-# ─────────────────────────────────────────────
-# 데이터 전처리
-# ─────────────────────────────────────────────
+    if st.button("✅ 확인", key="btn_ads", use_container_width=True):
+        if mode_ads == "샘플" or df_ads_temp is not None:
+            st.session_state.ads_raw_data = df_ads_temp
+            # 상품 목록 추출 및 병합
+            if df_ads_temp is not None:
+                prod_col = find_col(df_ads_temp, "광고 그룹") or find_col(df_ads_temp, "광고그룹") or find_col(df_ads_temp, "상품명")
+                if prod_col:
+                    new_products = df_ads_temp[prod_col].dropna().unique().tolist()
+                    existing = st.session_state.product_list
+                    for p in new_products:
+                        p_str = str(p).strip()
+                        if p_str and p_str not in existing:
+                            existing.append(p_str)
+                    st.session_state.product_list = existing
+                    save_products(existing)
+            st.session_state.ads_confirmed = True
+            st.success("광고 데이터 반영!")
+        else:
+            st.warning("데이터를 먼저 입력하세요.")
 
-if df_members is None or df_ads is None:
-    st.info("사이드바에서 데이터를 입력해 주세요.")
-    st.stop()
 
-# 날짜 컬럼 정규화
-date_col_m = df_members.columns[0]
-date_col_candidates = [c for c in df_ads.columns if "기간" in str(c)]
-date_col_a = date_col_candidates[0] if date_col_candidates else df_ads.columns[0]
-df_members[date_col_m] = pd.to_datetime(df_members[date_col_m], errors="coerce")
-df_ads[date_col_a] = pd.to_datetime(
-    df_ads[date_col_a].astype(str).str.replace(".", "-", regex=False),
-    errors="coerce"
-)
+# ═════════════════════════════════════════════
+# 회원 수 데이터 렌더링 함수
+# ═════════════════════════════════════════════
 
-# 컬럼 탐지
-revenue_col = [c for c in df_ads.columns if "전환 매출" in str(c) or ("매출" in str(c) and "구매완료" not in str(c))]
-cost_col = [c for c in df_ads.columns if "총 비용" in str(c) or ("총비용" in str(c) and "전환" not in str(c))]
-campaign_col_candidates = [c for c in df_ads.columns if "캠페인 이름" in str(c)]
-campaign_col = campaign_col_candidates[0] if campaign_col_candidates else None
+def render_member_section(key_prefix):
+    if not direct_input_mode:
+        # 파일 업로드 / 샘플 모드
+        if not st.session_state.members_confirmed:
+            return
 
-# ROAS — CSV에 있으면 사용, 없으면 계산
-roas_col_candidates = [c for c in df_ads.columns if "수익률" in str(c) or "ROAS" in str(c)]
-if roas_col_candidates:
-    df_ads["ROAS"] = pd.to_numeric(df_ads[roas_col_candidates[0]], errors="coerce").round(1)
-elif revenue_col and cost_col:
-    df_ads["ROAS"] = (
-        pd.to_numeric(df_ads[revenue_col[0]], errors="coerce")
-        / pd.to_numeric(df_ads[cost_col[0]], errors="coerce")
-        * 100
-    ).round(1)
+        if mode_members == "파일 업로드":
+            df_mem = df_members_file
+        else:
+            try:
+                df_mem = pd.read_csv("sample_data/members.csv")
+            except FileNotFoundError:
+                return
 
-# 전일 대비 자동 계산
-member_col = [c for c in df_members.columns if "회원수" in c][0]
-df_members_sorted = df_members.sort_values(date_col_m).reset_index(drop=True)
-df_members_sorted["전일비 증감(명)"] = df_members_sorted[member_col].diff().fillna(0).astype(int)
-df_members_sorted["전일비 증감(%)"] = (
-    df_members_sorted[member_col].pct_change().fillna(0) * 100
-).round(2)
+        if df_mem is None:
+            return
 
-# ─────────────────────────────────────────────
-# 필터 — 상품
-# ─────────────────────────────────────────────
+        date_col_m = df_mem.columns[0]
+        df_mem[date_col_m] = pd.to_datetime(df_mem[date_col_m], errors="coerce")
+        member_col = [c for c in df_mem.columns if "회원수" in c][0]
+        df_sorted = df_mem.sort_values(date_col_m).reset_index(drop=True)
+        df_sorted["전일비 증감(명)"] = df_sorted[member_col].diff().fillna(0).astype(int)
+        df_sorted["전일비 증감(%)"] = (df_sorted[member_col].pct_change().fillna(0) * 100).round(2)
 
-# 상품 목록 추출
-prod_col_candidates = [c for c in df_ads.columns if ("광고 그룹" in str(c) and "ID" not in str(c)) or "상품명" in str(c)]
-prod_col = prod_col_candidates[0] if prod_col_candidates else df_ads.columns[0]
-products_sorted = sorted(df_ads[prod_col].dropna().unique().tolist())
+        naver_col = [c for c in df_mem.columns if "네이버" in c][0]
+        sales_col = [c for c in df_mem.columns if "매출" in c][0]
 
-sort_mode = st.radio("상품 정렬", ["가나다순", "직접 지정"], horizontal=True)
-if sort_mode == "직접 지정":
-    order_input = st.text_input("원하는 순서로 상품명 입력 (쉼표 구분)", value=", ".join(products_sorted))
-    custom_order = [p.strip() for p in order_input.split(",") if p.strip()]
-    product_list = custom_order + [p for p in products_sorted if p not in custom_order]
-else:
-    product_list = products_sorted
+        st.subheader("회원 수 데이터")
+        rows1 = []
+        for _, r in df_sorted.iterrows():
+            delta_cnt = int(r["전일비 증감(명)"])
+            delta_pct = float(r["전일비 증감(%)"])
+            rows1.append({
+                "날짜": r[date_col_m].strftime("%Y-%m-%d") if pd.notna(r[date_col_m]) else "",
+                "자사몰 회원수": fmt_number(r[member_col]),
+                "전일비 증감(명)": ("+" if delta_cnt >= 0 else "") + fmt_number(delta_cnt),
+                "전일비 증감(%)": ("+" if delta_pct >= 0 else "") + fmt_pct(delta_pct),
+                "네이버 관심고객 증감율(%)": fmt_pct(r[naver_col]),
+                "자사몰 당일 매출": fmt_money(r[sales_col]),
+            })
+        display1 = pd.DataFrame(rows1)
+        styled1 = display1.style.map(color_delta, subset=["전일비 증감(명)", "전일비 증감(%)", "네이버 관심고객 증감율(%)"])
+        st.dataframe(styled1, use_container_width=True, hide_index=True)
+        return
 
-selected_product = st.selectbox("상품 선택", product_list)
+    # ── 직접 입력 모드: 기간 필터 버튼 ──
+    def cb_filter_all():
+        st.session_state.filter_mode = "전체"
+        st.session_state.filter_year = today.year
+        st.session_state.filter_month = today.month
+        st.session_state.filter_week = 1
 
-st.divider()
+    def cb_year_left():
+        st.session_state.filter_year -= 1
+        st.session_state.filter_mode = "기간"
 
-# ─────────────────────────────────────────────
-# 표 1 — 자사몰·네이버 회원 현황
-# ─────────────────────────────────────────────
+    def cb_year_right():
+        st.session_state.filter_year += 1
+        st.session_state.filter_mode = "기간"
 
-st.subheader("자사몰·네이버 회원 현황")
+    def cb_year_label():
+        st.session_state.filter_mode = "기간"
 
-naver_col = [c for c in df_members.columns if "네이버" in c][0]
-sales_col = [c for c in df_members.columns if "매출" in c][0]
+    def cb_month_left():
+        st.session_state.filter_month -= 1
+        if st.session_state.filter_month < 1:
+            st.session_state.filter_month = 12
+            st.session_state.filter_year -= 1
+        st.session_state.filter_mode = "기간"
 
-rows1 = []
-for _, r in df_members_sorted.iterrows():
-    delta_cnt = int(r["전일비 증감(명)"])
-    delta_pct = float(r["전일비 증감(%)"])
-    rows1.append({
-        "날짜": r[date_col_m].strftime("%Y-%m-%d") if pd.notna(r[date_col_m]) else "",
-        "자사몰 회원수": fmt_number(r[member_col]),
-        "전일비 증감(명)": ("+" if delta_cnt >= 0 else "") + fmt_number(delta_cnt),
-        "전일비 증감(%)": ("+" if delta_pct >= 0 else "") + fmt_pct(delta_pct),
-        "네이버 관심고객 증감율(%)": fmt_pct(r[naver_col]),
-        "자사몰 당일 매출": fmt_money(r[sales_col]),
+    def cb_month_right():
+        st.session_state.filter_month += 1
+        if st.session_state.filter_month > 12:
+            st.session_state.filter_month = 1
+            st.session_state.filter_year += 1
+        st.session_state.filter_mode = "기간"
+
+    def cb_month_label():
+        st.session_state.filter_mode = "기간"
+
+    def cb_week_left():
+        st.session_state.filter_week -= 1
+        if st.session_state.filter_week < 1:
+            st.session_state.filter_month -= 1
+            if st.session_state.filter_month < 1:
+                st.session_state.filter_month = 12
+                st.session_state.filter_year -= 1
+            st.session_state.filter_week = get_max_weeks(st.session_state.filter_year, st.session_state.filter_month)
+        st.session_state.filter_mode = "기간"
+
+    def cb_week_right():
+        max_w = get_max_weeks(st.session_state.filter_year, st.session_state.filter_month)
+        st.session_state.filter_week += 1
+        if st.session_state.filter_week > max_w:
+            st.session_state.filter_week = 1
+            st.session_state.filter_month += 1
+            if st.session_state.filter_month > 12:
+                st.session_state.filter_month = 1
+                st.session_state.filter_year += 1
+        st.session_state.filter_mode = "기간"
+
+    def cb_week_label():
+        st.session_state.filter_mode = "기간"
+
+    st.subheader("회원 수 데이터")
+
+    c_all, c_year, c_month, c_week = st.columns(4)
+
+    with c_all:
+        st.button("전체", key=f"{key_prefix}_filter_all", use_container_width=True, on_click=cb_filter_all)
+
+    with c_year:
+        yl, ylabel, yr = st.columns([1, 3, 1])
+        with yl:
+            st.button("◀", key=f"{key_prefix}_year_left", use_container_width=True, on_click=cb_year_left)
+        with ylabel:
+            st.button(f"{st.session_state.filter_year}년", key=f"{key_prefix}_year_label", use_container_width=True, on_click=cb_year_label)
+        with yr:
+            st.button("▶", key=f"{key_prefix}_year_right", use_container_width=True, on_click=cb_year_right)
+
+    with c_month:
+        ml, mlabel, mr = st.columns([1, 3, 1])
+        with ml:
+            st.button("◀", key=f"{key_prefix}_month_left", use_container_width=True, on_click=cb_month_left)
+        with mlabel:
+            st.button(f"{st.session_state.filter_month}월", key=f"{key_prefix}_month_label", use_container_width=True, on_click=cb_month_label)
+        with mr:
+            st.button("▶", key=f"{key_prefix}_month_right", use_container_width=True, on_click=cb_month_right)
+
+    with c_week:
+        wl, wlabel, wr = st.columns([1, 3, 1])
+        with wl:
+            st.button("◀", key=f"{key_prefix}_week_left", use_container_width=True, on_click=cb_week_left)
+        with wlabel:
+            st.button(f"{st.session_state.filter_week}주차", key=f"{key_prefix}_week_label", use_container_width=True, on_click=cb_week_label)
+        with wr:
+            st.button("▶", key=f"{key_prefix}_week_right", use_container_width=True, on_click=cb_week_right)
+
+    f_mode = st.session_state.filter_mode
+
+    if f_mode == "전체":
+        if st.session_state.member_data:
+            all_dates = sorted(st.session_state.member_data.keys())
+            range_start = pd.Timestamp(all_dates[0])
+            range_end = pd.Timestamp(all_dates[-1])
+        else:
+            range_start = pd.Timestamp(today - timedelta(days=9))
+            range_end = pd.Timestamp(today)
+    else:
+        w_start, w_end = get_week_range(st.session_state.filter_year, st.session_state.filter_month, st.session_state.filter_week)
+        range_start = pd.Timestamp(w_start)
+        range_end = pd.Timestamp(w_end)
+
+    dates = pd.date_range(start=range_start, end=range_end)
+    n = len(dates)
+
+    rows = []
+    for d in dates:
+        d_str = d.strftime("%Y-%m-%d")
+        data = st.session_state.member_data.get(d_str, {})
+        rows.append({
+            "일자": d_str,
+            "nv_cust": data.get("nv_cust", None),
+            "nv_rev": data.get("nv_rev", None),
+            "js_mem": data.get("js_mem", None),
+            "js_rev": data.get("js_rev", None),
+        })
+
+    df = pd.DataFrame(rows)
+    nv_cust = pd.to_numeric(df["nv_cust"], errors="coerce")
+    nv_rev = pd.to_numeric(df["nv_rev"], errors="coerce")
+    js_mem = pd.to_numeric(df["js_mem"], errors="coerce")
+    js_rev = pd.to_numeric(df["js_rev"], errors="coerce")
+
+    nv_increase = nv_cust.diff()
+    js_increase = js_mem.diff()
+    nv_growth = nv_cust.pct_change().mul(100).round(2)
+    js_growth = js_mem.pct_change().mul(100).round(2)
+
+    nv_mean = nv_cust.mean()
+    js_mean = js_mem.mean()
+    nv_avg_diff = ((nv_cust - nv_mean) / nv_mean * 100).round(2) if pd.notna(nv_mean) and nv_mean != 0 else pd.Series([None] * n)
+    js_avg_diff = ((js_mem - js_mean) / js_mean * 100).round(2) if pd.notna(js_mean) and js_mean != 0 else pd.Series([None] * n)
+
+    def safe_fmt_num(x):
+        return fmt_number(x) if pd.notna(x) and x != 0 else ""
+    def safe_fmt_money(x):
+        return fmt_money(x) if pd.notna(x) and x != 0 else ""
+    def safe_fmt_delta(x):
+        return f"{x:+.2f}%" if pd.notna(x) else ""
+    def safe_fmt_increase(x):
+        if pd.notna(x):
+            v = int(x)
+            return f"+{v:,}" if v >= 0 else f"{v:,}"
+        return ""
+
+    result = pd.DataFrame({
+        ("회원 수 데이터", "일자"): df["일자"],
+        ("네이버", "관심 고객수"): nv_cust.apply(safe_fmt_num),
+        ("네이버", "매출"): nv_rev.apply(safe_fmt_money),
+        ("네이버", "회원 증가수"): nv_increase.apply(safe_fmt_increase),
+        ("네이버", "회원 증감율"): nv_growth.apply(safe_fmt_delta),
+        ("네이버", "평균대비"): nv_avg_diff.apply(safe_fmt_delta),
+        ("자사몰", "회원수"): js_mem.apply(safe_fmt_num),
+        ("자사몰", "매출"): js_rev.apply(safe_fmt_money),
+        ("자사몰", "회원 증가수"): js_increase.apply(safe_fmt_increase),
+        ("자사몰", "회원 증감율"): js_growth.apply(safe_fmt_delta),
+        ("자사몰", "평균대비"): js_avg_diff.apply(safe_fmt_delta),
     })
-display1 = pd.DataFrame(rows1)
-styled1 = display1.style.map(color_delta, subset=["전일비 증감(명)", "전일비 증감(%)", "네이버 관심고객 증감율(%)"])
-st.dataframe(styled1, use_container_width=True, hide_index=True)
+    result.columns = pd.MultiIndex.from_tuples(result.columns)
 
-st.divider()
+    delta_cols = [
+        ("네이버", "회원 증가수"), ("네이버", "회원 증감율"), ("네이버", "평균대비"),
+        ("자사몰", "회원 증가수"), ("자사몰", "회원 증감율"), ("자사몰", "평균대비"),
+    ]
+    styled = result.style.map(color_delta, subset=delta_cols)
+    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+
+# ═════════════════════════════════════════════
+# 광고 데이터 렌더링 함수
+# ═════════════════════════════════════════════
+
+def render_ads_section(key_prefix):
+    st.subheader("광고 데이터 분석")
+
+    if not st.session_state.ads_confirmed:
+        return
+
+    df_ads = st.session_state.ads_raw_data
+    if df_ads is None:
+        return
+
+    df_ads = df_ads.copy()
+
+    # ── 컬럼 자동 감지 ──
+    date_col = find_col(df_ads, "일") or find_col(df_ads, "날짜") or find_col(df_ads, "기간")
+    if date_col is None:
+        date_col = df_ads.columns[0]
+
+    cost_col = find_col(df_ads, "총비용") or find_col(df_ads, "총 비용")
+    purchase_col = find_col(df_ads, "구매완료수") or find_col(df_ads, "구매전환수")
+    purchase_rev_col = find_col(df_ads, "구매완료 전환 매출") or find_col(df_ads, "구매완료", "매출") or find_col(df_ads, "총구매전환매출")
+    prod_col = find_col(df_ads, "광고 그룹") or find_col(df_ads, "광고그룹") or find_col(df_ads, "상품명")
+    campaign_col = find_col(df_ads, "캠페인")
+
+    # 날짜 정규화
+    df_ads[date_col] = pd.to_datetime(
+        df_ads[date_col].astype(str).str.replace(".", "-", regex=False),
+        errors="coerce"
+    )
+
+    # ── 날짜 범위 필터링 ──
+    ads_start = pd.Timestamp(st.session_state.ads_date_start)
+    ads_end = pd.Timestamp(st.session_state.ads_date_end)
+    df_ads = df_ads[
+        (df_ads[date_col] >= ads_start) & (df_ads[date_col] <= ads_end)
+    ]
+
+    if df_ads.empty:
+        st.warning(f"선택한 날짜 범위({ads_start.strftime('%Y-%m-%d')} ~ {ads_end.strftime('%Y-%m-%d')})에 해당하는 데이터가 없습니다.")
+        return
+
+    # ── 3-1. 상품 버튼 시스템 ──
+    product_list = st.session_state.product_list
+
+    # 상품 버튼 표시
+    if product_list:
+        btn_cols = st.columns(min(len(product_list) + 2, 10))
+        col_idx = 0
+
+        # 전체 버튼
+        with btn_cols[col_idx % len(btn_cols)]:
+            if st.button("전체", key=f"{key_prefix}_prod_all", use_container_width=True,
+                         type="primary" if st.session_state.selected_product is None else "secondary"):
+                st.session_state.selected_product = None
+                st.rerun()
+        col_idx += 1
+
+        # 각 상품 버튼
+        products_to_remove = []
+        for p in product_list:
+            with btn_cols[col_idx % len(btn_cols)]:
+                bc1, bc2 = st.columns([4, 1])
+                with bc1:
+                    if st.button(p, key=f"{key_prefix}_prod_{p}", use_container_width=True,
+                                 type="primary" if st.session_state.selected_product == p else "secondary"):
+                        st.session_state.selected_product = p
+                        st.rerun()
+                with bc2:
+                    if st.button("X", key=f"{key_prefix}_del_{p}"):
+                        products_to_remove.append(p)
+            col_idx += 1
+
+        # 삭제 처리
+        if products_to_remove:
+            for p in products_to_remove:
+                if p in st.session_state.product_list:
+                    st.session_state.product_list.remove(p)
+            save_products(st.session_state.product_list)
+            if st.session_state.selected_product in products_to_remove:
+                st.session_state.selected_product = None
+            st.rerun()
+
+    # [+] 추가 버튼
+    add_col1, add_col2 = st.columns([1, 5])
+    with add_col1:
+        if st.button("+", key=f"{key_prefix}_add_prod"):
+            st.session_state.adding_product = not st.session_state.adding_product
+            st.rerun()
+
+    if st.session_state.adding_product:
+        with add_col2:
+            new_name = st.text_input("상품명 입력", key=f"{key_prefix}_new_prod_name")
+            if st.button("추가", key=f"{key_prefix}_confirm_add"):
+                if new_name.strip() and new_name.strip() not in st.session_state.product_list:
+                    st.session_state.product_list.append(new_name.strip())
+                    save_products(st.session_state.product_list)
+                    st.session_state.adding_product = False
+                    st.rerun()
+
+    # ── 상품 필터링 ──
+    selected = st.session_state.selected_product
+    if selected and prod_col:
+        df_filtered = df_ads[df_ads[prod_col].astype(str).str.contains(selected, na=False)]
+    else:
+        df_filtered = df_ads
+
+    # ── 3-3. 네이버스토어/자사몰/META 서브탭 ──
+    sub_naver, sub_jasamol, sub_meta = st.tabs(["네이버스토어", "자사몰", "META"])
+
+    def render_ads_table(df_sub, tab_key):
+        if df_sub.empty:
+            st.info("해당 조건의 데이터가 없습니다.")
+            return
+
+        # 숫자 변환
+        numeric_cols = []
+        for col in df_sub.columns:
+            if col == date_col or col == prod_col or col == campaign_col:
+                continue
+            df_sub[col] = pd.to_numeric(df_sub[col].astype(str).str.replace(",", ""), errors="coerce")
+            numeric_cols.append(col)
+
+        # 날짜순 정렬
+        df_sub = df_sub.sort_values(date_col)
+
+        # 계산 컬럼 추가
+        if cost_col and purchase_col:
+            df_sub["CPA"] = df_sub.apply(lambda r: safe_divide(r.get(cost_col, 0), r.get(purchase_col, 0)), axis=1)
+        if purchase_rev_col and purchase_col:
+            df_sub["AOV"] = df_sub.apply(lambda r: safe_divide(r.get(purchase_rev_col, 0), r.get(purchase_col, 0)), axis=1)
+        if purchase_rev_col and cost_col:
+            df_sub["ROAS"] = df_sub.apply(lambda r: safe_divide(r.get(purchase_rev_col, 0), r.get(cost_col, 0)) * 100, axis=1)
+
+        # 표시할 컬럼 구성 (일자를 첫 열로)
+        display_cols = [date_col]
+        for c in df_sub.columns:
+            if c == date_col:
+                continue
+            if c == prod_col or c == campaign_col:
+                continue
+            if "ID" in str(c) or "Id" in str(c):
+                continue
+            if c in ["결과 유형", "결과당 비용 유형", "결과유형", "결과당 비용유형"]:
+                continue
+            display_cols.append(c)
+
+        df_display = df_sub[display_cols].copy()
+
+        # 날짜 포맷팅
+        df_display[date_col] = df_display[date_col].apply(
+            lambda x: x.strftime("%Y-%m-%d") if pd.notna(x) else ""
+        )
+
+        # 컬럼명 정리: 첫 열을 "일자"로 표시
+        rename_map = {date_col: "일자"}
+        df_display = df_display.rename(columns=rename_map)
+
+        # 숫자 포맷팅
+        for c in df_display.columns:
+            if c == "일자":
+                continue
+            if c in ["CPA", "AOV"]:
+                df_display[c] = df_display[c].apply(lambda x: fmt_money(x) if pd.notna(x) else "")
+            elif c == "ROAS":
+                df_display[c] = df_display[c].apply(lambda x: fmt_pct(x, 1) if pd.notna(x) else "")
+            elif "비용" in c or "매출" in c or "CPC" in c or "CPM" in c or "결과당" in c:
+                df_display[c] = df_display[c].apply(lambda x: fmt_money(x) if pd.notna(x) else "")
+            elif "CTR" in c or "율" in c:
+                df_display[c] = df_display[c].apply(lambda x: fmt_pct(x) if pd.notna(x) else "")
+            else:
+                df_display[c] = df_display[c].apply(lambda x: fmt_number(x) if pd.notna(x) else "")
+
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+    with sub_naver:
+        if campaign_col:
+            df_naver = df_filtered[df_filtered[campaign_col].astype(str).str.contains("네이버", na=False)].copy()
+        else:
+            df_naver = df_filtered.copy()
+        render_ads_table(df_naver, f"{key_prefix}_naver")
+
+    with sub_jasamol:
+        if campaign_col:
+            df_jasamol = df_filtered[df_filtered[campaign_col].astype(str).str.contains("자사몰", na=False)].copy()
+        else:
+            df_jasamol = df_filtered.copy()
+        render_ads_table(df_jasamol, f"{key_prefix}_jasamol")
+
+    with sub_meta:
+        st.info("META 광고 데이터 분석 준비 중입니다.")
+
 
 # ─────────────────────────────────────────────
-# 표 2 — 자사몰 캠페인 (선택 상품)
+# 상단 탭 네비게이션 + 콘텐츠
 # ─────────────────────────────────────────────
 
-st.subheader(f"자사몰 캠페인 — {selected_product}")
+tab_all, tab_members, tab_ads, tab_analysis = st.tabs(["전체", "회원현황", "광고 데이터", "광고 데이터 분석"])
 
-# 구매전환수: "결과" 키워드 (단, "유형"·"당" 제외)
-conv_col = [c for c in df_ads.columns if "결과" in str(c) and "유형" not in str(c) and "당" not in str(c)]
-# 전환당단가: "결과당 비용" (단, "유형" 제외)
-cpa_col = [c for c in df_ads.columns if "결과당 비용" in str(c) and "유형" not in str(c)]
-# 총전환비용: "총 비용" 또는 "총비용"
-conv_cost_col = [c for c in df_ads.columns if "총 비용" in str(c) or ("총비용" in str(c) and "전환" not in str(c))]
+with tab_all:
+    render_member_section("all_m")
+    st.divider()
+    render_ads_section("all_a")
 
-if campaign_col is not None:
-    mask_a2 = (df_ads[prod_col] == selected_product) & df_ads[campaign_col].str.contains("자사몰", na=False)
-else:
-    mask_a2 = df_ads[prod_col] == selected_product
-df_a2 = df_ads[mask_a2].sort_values(date_col_a)
+with tab_members:
+    render_member_section("mem")
 
-rows2 = []
-for _, r2 in df_a2.iterrows():
-    roas_val = r2.get("ROAS", None)
-    rows2.append({
-        "날짜": r2[date_col_a].strftime("%Y-%m-%d") if pd.notna(r2[date_col_a]) else "",
-        "구매전환수": fmt_number(r2[conv_col[0]]) if conv_col else "N/A",
-        "전환당단가": fmt_money(r2[cpa_col[0]]) if cpa_col else "N/A",
-        "총전환비용": fmt_money(r2[conv_cost_col[0]]) if conv_cost_col else "N/A",
-        "ROAS": fmt_pct(roas_val, 1) if pd.notna(roas_val) else "N/A",
-    })
+with tab_ads:
+    render_ads_section("ads")
 
-if rows2:
-    st.dataframe(pd.DataFrame(rows2), use_container_width=True, hide_index=True)
-else:
-    st.warning(f"{selected_product} 자사몰 데이터가 없습니다.")
-
-st.divider()
-
-# ─────────────────────────────────────────────
-# 표 3 — 네이버스토어 (선택 상품)
-# ─────────────────────────────────────────────
-
-st.subheader(f"네이버스토어 — {selected_product}")
-
-cpc_col = [c for c in df_ads.columns if "CPC" in str(c)]
-ctr_col = [c for c in df_ads.columns if "전환율" in str(c)]
-rev_col = [c for c in df_ads.columns if "전환 매출" in str(c) or ("매출" in str(c) and "구매완료" not in str(c))]
-
-if campaign_col is not None:
-    mask_a3 = (df_ads[prod_col] == selected_product) & df_ads[campaign_col].str.contains("네이버", na=False)
-else:
-    mask_a3 = df_ads[prod_col] == selected_product
-df_a3 = df_ads[mask_a3].sort_values(date_col_a)
-
-rows3 = []
-for _, r3 in df_a3.iterrows():
-    roas_val3 = r3.get("ROAS", None)
-    rows3.append({
-        "날짜": r3[date_col_a].strftime("%Y-%m-%d") if pd.notna(r3[date_col_a]) else "",
-        "CPC": fmt_money(r3[cpc_col[0]]) if cpc_col else "N/A",
-        "CTR(%)": fmt_pct(r3[ctr_col[0]]) if ctr_col else "N/A",
-        "총비용": fmt_money(r3[cost_col[0]]) if cost_col else "N/A",
-        "총구매전환매출": fmt_money(r3[rev_col[0]]) if rev_col else "N/A",
-        "ROAS": fmt_pct(roas_val3, 1) if pd.notna(roas_val3) else "N/A",
-    })
-
-if rows3:
-    st.dataframe(pd.DataFrame(rows3), use_container_width=True, hide_index=True)
-else:
-    st.warning(f"{selected_product} 네이버스토어 데이터가 없습니다.")
+with tab_analysis:
+    st.subheader("광고 데이터 분석")
+    st.caption("준비 중입니다.")
