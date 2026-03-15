@@ -406,18 +406,7 @@ with st.sidebar:
             st.session_state.ads_raw_data = df_ads_temp
             if df_ads_temp is not None:
                 save_ads_data(df_ads_temp)
-            # 상품 목록 추출 및 병합
-            if df_ads_temp is not None:
-                prod_col = find_col(df_ads_temp, "광고 그룹") or find_col(df_ads_temp, "광고그룹") or find_col(df_ads_temp, "상품명")
-                if prod_col:
-                    new_products = df_ads_temp[prod_col].dropna().unique().tolist()
-                    existing = st.session_state.product_list
-                    for p in new_products:
-                        p_str = str(p).strip()
-                        if p_str and p_str not in existing:
-                            existing.append(p_str)
-                    st.session_state.product_list = existing
-                    save_products(existing)
+            # 상품 목록은 [+] 버튼으로만 수동 추가
             st.session_state.ads_confirmed = True
             st.success("광고 데이터 반영!")
         else:
