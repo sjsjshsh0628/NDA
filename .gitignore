@@ -1,0 +1,11 @@
+# 인증 설정 (비밀번호 해시 포함)
+config.yaml
+
+# 데이터베이스
+*.db
+
+# JSON 데이터
+*.json
+
+# Python 캐시
+__pycache__/
