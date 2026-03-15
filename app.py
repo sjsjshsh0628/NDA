@@ -724,14 +724,18 @@ def render_ads_section(key_prefix):
         summary_row = pd.DataFrame([summary_formatted])
         df_display = pd.concat([df_display, summary_row], ignore_index=True)
 
-        # 합계행 스타일링 (같은 dataframe 안에서 배경색 구분)
-        def highlight_summary(row):
-            if row["일자"] == "합계":
-                return ["background-color: rgba(231,76,60,0.15); font-weight: bold"] * len(row)
-            return [""] * len(row)
+        # 합계행 분리
+        df_data = df_display.iloc[:-1]
+        df_summary = df_display.iloc[[-1]]
 
-        styled_display = df_display.style.apply(highlight_summary, axis=1)
-        st.dataframe(styled_display, use_container_width=True, hide_index=True)
+        # 합계행을 테이블 위에 배치 (스크롤해도 항상 보임)
+        def highlight_summary(row):
+            return ["background-color: rgba(231,76,60,0.15); font-weight: bold"] * len(row)
+
+        styled_summary = df_summary.style.apply(highlight_summary, axis=1)
+        st.dataframe(styled_summary, use_container_width=True, hide_index=True, height=38)
+
+        st.dataframe(df_data, use_container_width=True, hide_index=True)
 
     with sub_all:
         render_ads_table(df_filtered.copy(), f"{key_prefix}_all")
