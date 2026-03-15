@@ -619,7 +619,7 @@ def render_ads_section(key_prefix):
         df_filtered = df_ads
 
     # ── 3-3. 네이버스토어/자사몰/META 서브탭 ──
-    sub_naver, sub_jasamol, sub_meta = st.tabs(["네이버스토어", "자사몰", "META"])
+    sub_all, sub_naver, sub_jasamol, sub_meta = st.tabs(["전체", "네이버스토어", "자사몰", "META"])
 
     def render_ads_table(df_sub, tab_key):
         if df_sub.empty:
@@ -685,6 +685,9 @@ def render_ads_section(key_prefix):
                 df_display[c] = df_display[c].apply(lambda x: fmt_number(x) if pd.notna(x) else "")
 
         st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+    with sub_all:
+        render_ads_table(df_filtered.copy(), f"{key_prefix}_all")
 
     with sub_naver:
         if campaign_col:
