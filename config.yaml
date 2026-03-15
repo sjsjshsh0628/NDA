@@ -9,6 +9,6 @@ credentials:
       email: admin@company.com
       first_name: 관리자
       last_name: ""
-      password: $2b$12$CgtDlA5gS1OseRBOpMtHQuO7Nce8No9D74vraL8.CW3B.do4HlDXG
+      password: $2b$12$kLrvOHsBfuzL5ueeHxIvYera6HGut4h/tZHOxwMogQi15WpNj055q
       roles:
         - admin
