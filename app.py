@@ -224,6 +224,8 @@ def get_max_weeks(year, month):
 
 if "member_data" not in st.session_state:
     st.session_state.member_data = load_member_data()
+if "ads_raw_data" not in st.session_state:
+    st.session_state.ads_raw_data = load_ads_data()
 if "members_confirmed" not in st.session_state:
     st.session_state.members_confirmed = bool(st.session_state.member_data)
 if "ads_confirmed" not in st.session_state:
@@ -261,9 +263,6 @@ if "adding_product" not in st.session_state:
 if "product_list" not in st.session_state:
     st.session_state.product_list = load_products()
 
-# 광고 데이터 저장
-if "ads_raw_data" not in st.session_state:
-    st.session_state.ads_raw_data = load_ads_data()
 
 # ─────────────────────────────────────────────
 # 사이드바 — 데이터 입력
