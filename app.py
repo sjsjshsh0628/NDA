@@ -833,6 +833,8 @@ with tab_all:
     render_member_section("all_m")
     st.divider()
     render_ads_section("all_a")
+    st.divider()
+    render_analysis_section("all_an")
 
 with tab_members:
     render_member_section("mem")
@@ -840,217 +842,220 @@ with tab_members:
 with tab_ads:
     render_ads_section("ads")
 
-with tab_analysis:
+def render_analysis_section(key_prefix):
     _an_start, _an_end = get_filter_date_range()
     st.subheader(f"광고 데이터 분석 　{_an_start.strftime('%y.%m.%d')} ~ {_an_end.strftime('%y.%m.%d')}")
 
     df_raw = st.session_state.ads_raw_data
     if df_raw is None or not st.session_state.ads_confirmed:
         st.info("광고 데이터를 먼저 업로드하세요.")
-    else:
-        df_an = df_raw.copy()
+        return
 
-        # 컬럼 감지
-        an_date_col = find_col(df_an, "일") or find_col(df_an, "날짜") or find_col(df_an, "기간") or df_an.columns[0]
-        an_cost_col = find_col(df_an, "총비용") or find_col(df_an, "총 비용")
-        an_purchase_col = find_col(df_an, "구매완료수") or find_col(df_an, "구매전환수")
-        an_rev_col = find_col(df_an, "구매완료 전환 매출") or find_col(df_an, "구매완료", "매출") or find_col(df_an, "총구매전환매출")
-        an_prod_col = find_col(df_an, "광고 그룹", exclude=["ID", "Id"]) or find_col(df_an, "광고그룹", exclude=["ID", "Id"]) or find_col(df_an, "상품명")
+    df_an = df_raw.copy()
 
-        # 날짜 정규화
-        df_an[an_date_col] = pd.to_datetime(df_an[an_date_col].astype(str).str.replace(".", "-", regex=False), errors="coerce")
+    # 컬럼 감지
+    an_date_col = find_col(df_an, "일") or find_col(df_an, "날짜") or find_col(df_an, "기간") or df_an.columns[0]
+    an_cost_col = find_col(df_an, "총비용") or find_col(df_an, "총 비용")
+    an_purchase_col = find_col(df_an, "구매완료수") or find_col(df_an, "구매전환수")
+    an_rev_col = find_col(df_an, "구매완료 전환 매출") or find_col(df_an, "구매완료", "매출") or find_col(df_an, "총구매전환매출")
+    an_prod_col = find_col(df_an, "광고 그룹", exclude=["ID", "Id"]) or find_col(df_an, "광고그룹", exclude=["ID", "Id"]) or find_col(df_an, "상품명")
 
-        # 날짜 필터 적용
-        an_range_start, an_range_end = get_filter_date_range()
-        df_an = df_an[(df_an[an_date_col] >= an_range_start) & (df_an[an_date_col] <= an_range_end)]
+    # 날짜 정규화
+    df_an[an_date_col] = pd.to_datetime(df_an[an_date_col].astype(str).str.replace(".", "-", regex=False), errors="coerce")
 
-        if df_an.empty:
-            st.warning("선택한 기간에 데이터가 없습니다.")
+    # 날짜 필터 적용
+    an_range_start, an_range_end = get_filter_date_range()
+    df_an = df_an[(df_an[an_date_col] >= an_range_start) & (df_an[an_date_col] <= an_range_end)]
+
+    if df_an.empty:
+        st.warning("선택한 기간에 데이터가 없습니다.")
+        return
+
+    # 숫자 변환
+    for col in [an_cost_col, an_purchase_col, an_rev_col]:
+        if col:
+            df_an[col] = pd.to_numeric(df_an[col].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
+
+    # ── 1. 전일비 요약 카드 ──
+    st.markdown("### 전일비 요약")
+
+    product_list_an = st.session_state.product_list
+
+    def calc_daily_metrics(df_subset):
+        daily = df_subset.groupby(an_date_col).agg(
+            총비용=(an_cost_col, "sum") if an_cost_col else (df_subset.columns[0], "count"),
+            구매수=(an_purchase_col, "sum") if an_purchase_col else (df_subset.columns[0], "count"),
+            매출=(an_rev_col, "sum") if an_rev_col else (df_subset.columns[0], "count"),
+        ).sort_index()
+
+        if len(daily) < 1:
+            return None
+
+        daily["CPA"] = daily.apply(lambda r: safe_divide(r["총비용"], r["구매수"]), axis=1)
+        daily["ROAS"] = daily.apply(lambda r: safe_divide(r["매출"], r["총비용"]) * 100, axis=1)
+        return daily
+
+    if an_cost_col and an_purchase_col and an_rev_col:
+        daily_all = calc_daily_metrics(df_an)
+
+        if daily_all is not None and len(daily_all) >= 1:
+            last = daily_all.iloc[-1]
+            last_date = daily_all.index[-1]
+            prev = daily_all.iloc[-2] if len(daily_all) >= 2 else None
+            prev_date = daily_all.index[-2] if len(daily_all) >= 2 else None
+
+            if prev_date is not None:
+                st.caption(f"기준: {last_date.strftime('%m/%d')} vs 전일 {prev_date.strftime('%m/%d')}")
+            else:
+                st.caption(f"기준: {last_date.strftime('%m/%d')} (전일 데이터 없음)")
+
+            card_cols = st.columns(5)
+            metrics = [
+                ("총 광고비", last["총비용"], prev["총비용"] if prev is not None else None, "₩"),
+                ("총 매출", last["매출"], prev["매출"] if prev is not None else None, "₩"),
+                ("구매수", last["구매수"], prev["구매수"] if prev is not None else None, ""),
+                ("CPA", last["CPA"], prev["CPA"] if prev is not None else None, "₩"),
+                ("ROAS", last["ROAS"], prev["ROAS"] if prev is not None else None, "%"),
+            ]
+
+            for i, (label, val, prev_val, unit) in enumerate(metrics):
+                with card_cols[i]:
+                    if unit == "₩":
+                        display_val = fmt_money(val)
+                    elif unit == "%":
+                        display_val = fmt_pct(val, 1)
+                    else:
+                        display_val = fmt_number(val)
+
+                    if prev_val is not None and prev_val != 0:
+                        delta_pct = (val - prev_val) / prev_val * 100
+                        delta_str = f"{delta_pct:+.1f}%"
+                        if label == "CPA":
+                            delta_color = "inverse"
+                        else:
+                            delta_color = "normal"
+                        st.metric(label, display_val, delta_str, delta_color=delta_color)
+                    else:
+                        st.metric(label, display_val)
+
+        st.divider()
+
+        # ── 2. 상품별 ROAS 비교 막대 그래프 ──
+        st.markdown("### 상품별 ROAS 비교")
+
+        if an_prod_col and product_list_an:
+            roas_data = []
+            for prod in product_list_an:
+                mask = df_an[an_prod_col].astype(str).str.contains(prod, case=False, na=False, regex=False)
+                df_prod = df_an[mask]
+                if df_prod.empty:
+                    continue
+                total_cost = df_prod[an_cost_col].sum()
+                total_rev = df_prod[an_rev_col].sum()
+                total_purchases = df_prod[an_purchase_col].sum()
+                roas_val = safe_divide(total_rev, total_cost) * 100
+                cpa_val = safe_divide(total_cost, total_purchases)
+                roas_data.append({
+                    "상품명": prod,
+                    "ROAS": round(roas_val, 1),
+                    "CPA": round(cpa_val),
+                    "총비용": total_cost,
+                    "매출": total_rev,
+                })
+
+            if roas_data:
+                df_roas = pd.DataFrame(roas_data).sort_values("ROAS", ascending=True)
+
+                fig_roas = px.bar(
+                    df_roas, x="ROAS", y="상품명", orientation="h",
+                    text="ROAS",
+                    color="ROAS",
+                    color_continuous_scale=["#dc2626", "#f59e0b", "#16a34a"],
+                )
+                fig_roas.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+                fig_roas.update_layout(
+                    height=max(300, len(df_roas) * 50),
+                    margin=dict(l=0, r=50, t=10, b=0),
+                    coloraxis_showscale=False,
+                    xaxis_title="ROAS (%)",
+                    yaxis_title="",
+                )
+                st.plotly_chart(fig_roas, use_container_width=True, key=f"{key_prefix}_roas_chart")
+            else:
+                st.info("상품별 데이터가 없습니다.")
         else:
-            # 숫자 변환
-            for col in [an_cost_col, an_purchase_col, an_rev_col]:
-                if col:
-                    df_an[col] = pd.to_numeric(df_an[col].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
+            st.info("상품 목록을 추가하면 상품별 비교가 표시됩니다.")
 
-            # ── 1. 전일비 요약 카드 ──
-            st.markdown("### 전일비 요약")
+        st.divider()
 
-            # 상품별 매칭을 위한 함수
-            product_list_an = st.session_state.product_list
+        # ── 3. 일별 CPA 추이 꺾은선 그래프 ──
+        st.markdown("### 일별 CPA / ROAS 추이")
 
-            def calc_daily_metrics(df_subset):
-                """일별로 집계 후 마지막 날 vs 전날 비교"""
-                daily = df_subset.groupby(an_date_col).agg(
-                    총비용=(an_cost_col, "sum") if an_cost_col else (df_subset.columns[0], "count"),
-                    구매수=(an_purchase_col, "sum") if an_purchase_col else (df_subset.columns[0], "count"),
-                    매출=(an_rev_col, "sum") if an_rev_col else (df_subset.columns[0], "count"),
-                ).sort_index()
+        if daily_all is not None and len(daily_all) >= 2:
+            df_trend = daily_all.reset_index()
+            df_trend["날짜"] = df_trend[an_date_col].dt.strftime("%m/%d")
 
-                if len(daily) < 1:
-                    return None
+            fig_trend = go.Figure()
+            fig_trend.add_trace(go.Scatter(
+                x=df_trend["날짜"], y=df_trend["CPA"],
+                name="CPA", mode="lines+markers",
+                line=dict(color="#dc2626", width=2),
+                yaxis="y",
+            ))
+            fig_trend.add_trace(go.Scatter(
+                x=df_trend["날짜"], y=df_trend["ROAS"],
+                name="ROAS", mode="lines+markers",
+                line=dict(color="#16a34a", width=2),
+                yaxis="y2",
+            ))
+            fig_trend.update_layout(
+                height=400,
+                margin=dict(l=0, r=0, t=30, b=0),
+                yaxis=dict(title="CPA (₩)", side="left", showgrid=False),
+                yaxis2=dict(title="ROAS (%)", side="right", overlaying="y", showgrid=False),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_trend, use_container_width=True, key=f"{key_prefix}_trend_chart")
 
-                daily["CPA"] = daily.apply(lambda r: safe_divide(r["총비용"], r["구매수"]), axis=1)
-                daily["ROAS"] = daily.apply(lambda r: safe_divide(r["매출"], r["총비용"]) * 100, axis=1)
-                return daily
+            # 상품별 CPA 추이
+            if an_prod_col and product_list_an:
+                st.markdown("### 상품별 CPA 추이")
+                trend_data = []
+                for prod in product_list_an:
+                    mask = df_an[an_prod_col].astype(str).str.contains(prod, case=False, na=False, regex=False)
+                    df_p = df_an[mask]
+                    if df_p.empty:
+                        continue
+                    daily_p = df_p.groupby(an_date_col).agg(
+                        총비용=(an_cost_col, "sum"),
+                        구매수=(an_purchase_col, "sum"),
+                    ).sort_index().reset_index()
+                    daily_p["CPA"] = daily_p.apply(lambda r: safe_divide(r["총비용"], r["구매수"]), axis=1)
+                    daily_p["상품명"] = prod
+                    daily_p["날짜"] = daily_p[an_date_col]
+                    trend_data.append(daily_p[["날짜", "CPA", "상품명"]])
 
-            if an_cost_col and an_purchase_col and an_rev_col:
-                daily_all = calc_daily_metrics(df_an)
-
-                if daily_all is not None and len(daily_all) >= 1:
-                    last = daily_all.iloc[-1]
-                    last_date = daily_all.index[-1]
-                    prev = daily_all.iloc[-2] if len(daily_all) >= 2 else None
-                    prev_date = daily_all.index[-2] if len(daily_all) >= 2 else None
-
-                    if prev_date is not None:
-                        st.caption(f"기준: {last_date.strftime('%m/%d')} vs 전일 {prev_date.strftime('%m/%d')}")
-                    else:
-                        st.caption(f"기준: {last_date.strftime('%m/%d')} (전일 데이터 없음)")
-
-                    card_cols = st.columns(5)
-                    metrics = [
-                        ("총 광고비", last["총비용"], prev["총비용"] if prev is not None else None, "₩"),
-                        ("총 매출", last["매출"], prev["매출"] if prev is not None else None, "₩"),
-                        ("구매수", last["구매수"], prev["구매수"] if prev is not None else None, ""),
-                        ("CPA", last["CPA"], prev["CPA"] if prev is not None else None, "₩"),
-                        ("ROAS", last["ROAS"], prev["ROAS"] if prev is not None else None, "%"),
-                    ]
-
-                    for i, (label, val, prev_val, unit) in enumerate(metrics):
-                        with card_cols[i]:
-                            if unit == "₩":
-                                display_val = fmt_money(val)
-                            elif unit == "%":
-                                display_val = fmt_pct(val, 1)
-                            else:
-                                display_val = fmt_number(val)
-
-                            if prev_val is not None and prev_val != 0:
-                                delta_pct = (val - prev_val) / prev_val * 100
-                                delta_str = f"{delta_pct:+.1f}%"
-                                # CPA는 낮을수록 좋으므로 색상 반전
-                                if label == "CPA":
-                                    delta_color = "inverse"
-                                else:
-                                    delta_color = "normal"
-                                st.metric(label, display_val, delta_str, delta_color=delta_color)
-                            else:
-                                st.metric(label, display_val)
-
-                st.divider()
-
-                # ── 2. 상품별 ROAS 비교 막대 그래프 ──
-                st.markdown("### 상품별 ROAS 비교")
-
-                if an_prod_col and product_list_an:
-                    roas_data = []
-                    for prod in product_list_an:
-                        mask = df_an[an_prod_col].astype(str).str.contains(prod, case=False, na=False, regex=False)
-                        df_prod = df_an[mask]
-                        if df_prod.empty:
-                            continue
-                        total_cost = df_prod[an_cost_col].sum()
-                        total_rev = df_prod[an_rev_col].sum()
-                        total_purchases = df_prod[an_purchase_col].sum()
-                        roas_val = safe_divide(total_rev, total_cost) * 100
-                        cpa_val = safe_divide(total_cost, total_purchases)
-                        roas_data.append({
-                            "상품명": prod,
-                            "ROAS": round(roas_val, 1),
-                            "CPA": round(cpa_val),
-                            "총비용": total_cost,
-                            "매출": total_rev,
-                        })
-
-                    if roas_data:
-                        df_roas = pd.DataFrame(roas_data).sort_values("ROAS", ascending=True)
-
-                        fig_roas = px.bar(
-                            df_roas, x="ROAS", y="상품명", orientation="h",
-                            text="ROAS",
-                            color="ROAS",
-                            color_continuous_scale=["#dc2626", "#f59e0b", "#16a34a"],
-                        )
-                        fig_roas.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-                        fig_roas.update_layout(
-                            height=max(300, len(df_roas) * 50),
-                            margin=dict(l=0, r=50, t=10, b=0),
-                            coloraxis_showscale=False,
-                            xaxis_title="ROAS (%)",
-                            yaxis_title="",
-                        )
-                        st.plotly_chart(fig_roas, use_container_width=True)
-                    else:
-                        st.info("상품별 데이터가 없습니다.")
-                else:
-                    st.info("상품 목록을 추가하면 상품별 비교가 표시됩니다.")
-
-                st.divider()
-
-                # ── 3. 일별 CPA 추이 꺾은선 그래프 ──
-                st.markdown("### 일별 CPA / ROAS 추이")
-
-                if daily_all is not None and len(daily_all) >= 2:
-                    df_trend = daily_all.reset_index()
-                    df_trend["날짜"] = df_trend[an_date_col].dt.strftime("%m/%d")
-
-                    fig_trend = go.Figure()
-                    fig_trend.add_trace(go.Scatter(
-                        x=df_trend["날짜"], y=df_trend["CPA"],
-                        name="CPA", mode="lines+markers",
-                        line=dict(color="#dc2626", width=2),
-                        yaxis="y",
-                    ))
-                    fig_trend.add_trace(go.Scatter(
-                        x=df_trend["날짜"], y=df_trend["ROAS"],
-                        name="ROAS", mode="lines+markers",
-                        line=dict(color="#16a34a", width=2),
-                        yaxis="y2",
-                    ))
-                    fig_trend.update_layout(
+                if trend_data:
+                    df_all_trend = pd.concat(trend_data)
+                    fig_cpa = px.line(
+                        df_all_trend, x="날짜", y="CPA", color="상품명",
+                        markers=True,
+                    )
+                    fig_cpa.update_layout(
                         height=400,
-                        margin=dict(l=0, r=0, t=30, b=0),
-                        yaxis=dict(title="CPA (₩)", side="left", showgrid=False),
-                        yaxis2=dict(title="ROAS (%)", side="right", overlaying="y", showgrid=False),
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        yaxis_title="CPA (₩)",
+                        xaxis_title="",
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                         hovermode="x unified",
                     )
-                    st.plotly_chart(fig_trend, use_container_width=True)
+                    st.plotly_chart(fig_cpa, use_container_width=True, key=f"{key_prefix}_cpa_chart")
+        else:
+            st.info("추이 분석을 위해 2일 이상의 데이터가 필요합니다.")
+    else:
+        st.warning("총비용, 구매완료수, 매출 컬럼을 찾을 수 없습니다.")
 
-                    # 상품별 CPA 추이
-                    if an_prod_col and product_list_an:
-                        st.markdown("### 상품별 CPA 추이")
-                        trend_data = []
-                        for prod in product_list_an:
-                            mask = df_an[an_prod_col].astype(str).str.contains(prod, case=False, na=False, regex=False)
-                            df_p = df_an[mask]
-                            if df_p.empty:
-                                continue
-                            daily_p = df_p.groupby(an_date_col).agg(
-                                총비용=(an_cost_col, "sum"),
-                                구매수=(an_purchase_col, "sum"),
-                            ).sort_index().reset_index()
-                            daily_p["CPA"] = daily_p.apply(lambda r: safe_divide(r["총비용"], r["구매수"]), axis=1)
-                            daily_p["상품명"] = prod
-                            daily_p["날짜"] = daily_p[an_date_col]
-                            trend_data.append(daily_p[["날짜", "CPA", "상품명"]])
 
-                        if trend_data:
-                            df_all_trend = pd.concat(trend_data)
-                            fig_cpa = px.line(
-                                df_all_trend, x="날짜", y="CPA", color="상품명",
-                                markers=True,
-                            )
-                            fig_cpa.update_layout(
-                                height=400,
-                                margin=dict(l=0, r=0, t=10, b=0),
-                                yaxis_title="CPA (₩)",
-                                xaxis_title="",
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                                hovermode="x unified",
-                            )
-                            st.plotly_chart(fig_cpa, use_container_width=True)
-                else:
-                    st.info("추이 분석을 위해 2일 이상의 데이터가 필요합니다.")
-            else:
-                st.warning("총비용, 구매완료수, 매출 컬럼을 찾을 수 없습니다.")
+with tab_analysis:
+    render_analysis_section("analysis")
